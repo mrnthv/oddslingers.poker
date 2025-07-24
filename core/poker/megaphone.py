@@ -2,6 +2,7 @@ from django.conf import settings
 
 from oddslingers.utils import ExtendedEncoder
 from sockets.models import Socket, SocketQuerySet
+from .sidebetz_tracker import send_gamestate_to_sidebetz
 
 
 # the 'privado' keyword is added to any private gamestate in order so that
@@ -125,6 +126,11 @@ def broadcast_to_sockets(accessor, subscribers, only_to_player=None):
             'UPDATE_GAMESTATE',
             **json_to_send
         )
+
+    # Send the gamestate to Sidebetz
+    if settings.SIDEBETZ_ENABLED:
+        url = f"{settings.SIDEBETZ_URL}?tournament_id={accessor.table.tournament.id}&event_id=1"
+        send_gamestate_to_sidebetz(public_json_to_send, url)
 
     return sent_count
 

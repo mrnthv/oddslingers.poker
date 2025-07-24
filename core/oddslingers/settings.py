@@ -262,6 +262,9 @@ SETTINGS_SOURCES = (
 # Be careful moving things around below this point, settings depend on the above
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+SIDEBETZ_ENABLED = False
+SIDEBETZ_URL = 'https://dev.sidebetz.ai/api/update-game-state'
+
 # Some config should not be in git and can only be passed via secrets or os.env
 SECURE_SETTINGS_SOURCES = (ENV_SECRETS_FILE, 'os.environ')
 SECURE_SETTINGS = (
