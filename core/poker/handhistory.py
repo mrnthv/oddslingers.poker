@@ -641,11 +641,11 @@ class DBLog(JSONLog):
                 obj.hand_history_id = obj.hand_history.id
             obj.save()
 
+        self.objects_to_save = []
+
         rfpoker_data = generate_rfpoker_json(self.accessor.table, self.accessor.players, self)
         if rfpoker_data:
             write_to_file(rfpoker_data)
-
-        self.objects_to_save = []
 
 def fmt_hand(hand_json, filtered=True, for_player=None):
     od = OrderedDict(fmt_table(hand_json['table']))
