@@ -10,6 +10,7 @@ from poker.constants import (Event, TABLE_SUBJECT_REPR, SIDE_EFFECT_SUBJ,
                              PLAYER_API)
 from poker.models import (Player, PokerTable, HandHistory, HandHistoryEvent,
                           HandHistoryAction, SideEffectSubject)
+from poker.rfpoker import generate_rfpoker_json, write_to_file
 
 # important assumptions made by the JSON and DBLogs:
 #   - The END_HAND event will be called once per hand, and everything
@@ -639,6 +640,11 @@ class DBLog(JSONLog):
                 #   it's been committed to the database
                 obj.hand_history_id = obj.hand_history.id
             obj.save()
+
+        rfpoker_data = generate_rfpoker_json(self.accessor.table, self.accessor.players, self)
+        if rfpoker_data:
+            write_to_file(rfpoker_data)
+
         self.objects_to_save = []
 
 def fmt_hand(hand_json, filtered=True, for_player=None):

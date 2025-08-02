@@ -1131,9 +1131,6 @@ class HoldemController(GameController):
         #     if player.playing_state == PlayingState.SIT_IN_PENDING
         # ])
         self.internal_dispatch(self.final_end_hand_events())
-        rfpoker_data = generate_rfpoker_json(self.table, self.accessor.players, self.log)
-        if rfpoker_data:
-            write_to_file(rfpoker_data)
 
     def final_end_hand_events(self):
         return [

@@ -61,22 +61,39 @@ def generate_rfpoker_json(table, players, hand_history):
     }
 
     hands_data = []
+    winner_username = None
+    for event in current_hand_log.get('events', []):
+        if event['event'] == 'WIN':
+            winner_username = event['subj']
+            break
+
     for player in players:
         starting_stack = 0
+        cards = []
+        is_winner = player.username == winner_username
+        is_all_in = False
+
         if current_hand_log and 'players' in current_hand_log:
             for p_log in current_hand_log['players']:
                 if p_log['id'] == player.id:
                     starting_stack = p_log['stack']
                     break
 
+        for event in current_hand_log.get('events', []):
+            if event['event'] == 'DEAL' and event['subj'] == player.username:
+                cards.append(event['args']['card'])
+            if event['event'] in ['BET', 'RAISE_TO', 'CALL'] and event['args'].get('all_in'):
+                is_all_in = True
+
+
         hand_class = ""
-        if player.cards:
-            hand = rankings.hand_to_best_hand(player.cards + table.board)
+        if cards:
+            hand = rankings.hand_to_best_hand([Card(c) for c in cards] + table.board)
             hand_class = rankings.hand_to_name(hand)
 
 
         hands_data.append({
-            "cards": [str(c) for c in player.cards],
+            "cards": cards,
             "startingStack": int(starting_stack),
             "endingStack": int(player.stack),
             "seat": player.position,
@@ -87,9 +104,9 @@ def generate_rfpoker_json(table, players, hand_history):
             "buyIn": int(player.user.default_buyin * table.bb) if player.user else 0,
             "bonus": 5,
             "tips": 0,
-            "isWinner": False,  # To be implemented
+            "isWinner": is_winner,
             "isShowdown": False,  # To be implemented
-            "isAllIn": False,  # To be implemented
+            "isAllIn": is_all_in,
             "handClasses": [hand_class],
             "timestamp": now,
             "permissions": "PRIVATE",
@@ -99,8 +116,21 @@ def generate_rfpoker_json(table, players, hand_history):
     actions_data = []
 
     if current_hand_log:
-        # This is a simplified way to get streets and actions.
-        # A more robust implementation would parse the events in the hand history.
+        street = "PREFLOP"
+        pot_size = 0
+        for event in current_hand_log.get('events', []):
+            if event['event'] == 'NEW_STREET':
+                if street == "PREFLOP":
+                    street = "FLOP"
+                elif street == "FLOP":
+                    street = "TURN"
+                elif street == "TURN":
+                    street = "RIVER"
+
+            if event['event'] in ['POST', 'ANTE', 'BET', 'RAISE_TO', 'CALL']:
+                pot_size += event['args']['amt']
+
+
         streets = ["PREFLOP", "FLOP", "TURN", "RIVER"]
         board = table.board
         street_cards = {
