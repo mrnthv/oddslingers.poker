@@ -154,7 +154,7 @@ def generate_rfpoker_json(table, players, hand_history):
 
         for action in current_hand_log.get('actions', []):
             actions_data.append({
-                "bet": int(action.get('args', {}).get('amt', 0)),
+                "bet": int(float(action.get('args', {}).get('amt', 0))),
                 "actionType": action['action'],
                 "timestamp": action['ts'],
                 "call": 0, # To be implemented
