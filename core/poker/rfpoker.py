@@ -4,6 +4,7 @@ import requests
 from django.utils import timezone
 from poker.cards import Card
 from poker import rankings
+from poker.constants import Event
 
 API_ENDPOINT = "https://dev.sidebetz.ai/api/next-hand"
 TOURNAMENT_ID = "YOUR_TOURNAMENT_ID"
