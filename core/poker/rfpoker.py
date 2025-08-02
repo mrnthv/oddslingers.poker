@@ -89,6 +89,7 @@ def generate_rfpoker_json(table, players, hand_history):
 
         hand_class = ""
         if cards and len(cards) + len(table.board) >= 5:
+            print(f"cards: {cards}")
             best_hand = rankings.best_hand_from_cards([Card(c) for c in cards] + table.board)
             hand_class = rankings.hand_to_name(best_hand)
 
