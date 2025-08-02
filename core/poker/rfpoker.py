@@ -129,7 +129,7 @@ def generate_rfpoker_json(table, players, hand_history):
                     street = "RIVER"
 
             if event['event'] in ['POST', 'ANTE', 'BET', 'RAISE_TO', 'CALL']:
-                pot_size += int(event['args']['amt'])
+                pot_size += int(float(event['args']['amt']))
 
 
         streets = ["PREFLOP", "FLOP", "TURN", "RIVER"]
