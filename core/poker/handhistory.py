@@ -535,7 +535,7 @@ class DBLog(JSONLog):
 
         output = []
         for hand in hands:
-            if hand['table']['hand_number'] in unsaved_hands:
+            if hand and hand.get('table') and hand['table'].get('hand_number') in unsaved_hands:
                 unsaved_hand = unsaved_hands.pop(hand['table']['hand_number'])
 
                 output.append(self._add_gamestate_if_unserialized({
