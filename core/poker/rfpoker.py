@@ -26,7 +26,6 @@ def generate_rfpoker_json(table, players, hand_history):
     """
     now = timezone.now().isoformat()
     
-    # Get the rich, complete data structure for the hand that just ended
     if len(hand_history.hands) < 2:
         return None
     completed_hand_obj = hand_history.hands[-2]
@@ -35,7 +34,6 @@ def generate_rfpoker_json(table, players, hand_history):
     if not hand_data:
         return None
 
-    # Combine events and actions from the hand_data
     events = hand_data.get('events', [])
     actions = hand_data.get('actions', [])
     full_log = sorted(events + actions, key=lambda x: x.get('ts', ''))
@@ -71,48 +69,64 @@ def generate_rfpoker_json(table, players, hand_history):
         hands_data.append({
             "cards": player_cards,
             "startingStack": int(Decimal(player_state.get('stack', 0))),
-            "endingStack": int(player_obj.stack), # Current stack from the live player object
+            "endingStack": int(player_obj.stack),
             "seat": player_state.get('position'),
             "position": POSITION_MAP.get(player_state.get('position'), "UNKNOWN"),
             "playerNameOverride": player_state.get('username'),
             "isWinner": is_winner,
         })
 
-    # === Streets and Actions Data ===
+    # === Streets and Actions Data (Corrected Logic) ===
     streets_data = []
     actions_data_final = []
     current_street = "PREFLOP"
     
-    # Correctly parse the board_str
-    board_str = hand_data.get('table', {}).get('board_str', '')
-    board_cards = [Card(c) for c in board_str.split(',') if c] if board_str else []
+    # Reconstruct board cards directly from DEALER events
+    board_cards = [
+        item['args']['card'] for item in events 
+        if item.get('event') == 'DEAL' and item.get('subj') == 'DEALER'
+    ]
+    
+    # Track which streets have been seen
+    seen_streets = {"PREFLOP"}
 
-    # Process actions to assign streets
     for log_item in full_log:
         event_name = log_item.get('event')
         action_name = log_item.get('action')
 
-        if event_name == 'NEW_STREET':
-            if current_street == "PREFLOP": current_street = "FLOP"
-            elif current_street == "FLOP": current_street = "TURN"
-            elif current_street == "TURN": current_street = "RIVER"
+        # Only advance the street on the main "side_effect" event
+        if event_name == 'NEW_STREET' and log_item.get('subj') == 'side_effect':
+            if current_street == "PREFLOP":
+                current_street = "FLOP"
+                seen_streets.add("FLOP")
+            elif current_street == "FLOP":
+                current_street = "TURN"
+                seen_streets.add("TURN")
+            elif current_street == "TURN":
+                current_street = "RIVER"
+                seen_streets.add("RIVER")
         
         elif action_name:
+            # This is an action, assign it the current street
             acting_player = get_player_by_username(players, log_item.get('subj'))
             if acting_player:
                 actions_data_final.append({
                     "bet": int(Decimal(log_item.get('args', {}).get('amt', 0))),
                     "actionType": action_name,
                     "timestamp": log_item.get('ts'),
-                    "street": current_street,
+                    "street": current_street, # Assign the correct, tracked street
                     "actingSeat": acting_player.position
                 })
 
-    # Assemble the final streets data using the parsed board cards
-    streets_data.append({"streetType": "PREFLOP", "cards": []})
-    streets_data.append({"streetType": "FLOP", "cards": [str(c) for c in board_cards[:3]]})
-    streets_data.append({"streetType": "TURN", "cards": [str(c) for c in board_cards[:4]]})
-    streets_data.append({"streetType": "RIVER", "cards": [str(c) for c in board_cards]})
+    # Assemble the final streets data ONLY for streets that were seen
+    if "PREFLOP" in seen_streets:
+        streets_data.append({"streetType": "PREFLOP", "cards": []})
+    if "FLOP" in seen_streets:
+        streets_data.append({"streetType": "FLOP", "cards": board_cards[:3]})
+    if "TURN" in seen_streets:
+        streets_data.append({"streetType": "TURN", "cards": board_cards[:4]})
+    if "RIVER" in seen_streets:
+        streets_data.append({"streetType": "RIVER", "cards": board_cards})
     
     # === Final Assembly ===
     rfpoker_data = {
@@ -122,7 +136,7 @@ def generate_rfpoker_json(table, players, hand_history):
         "streets": streets_data,
         "actions": actions_data_final,
         "tableId": str(table.id),
-        "sessions": [], # Placeholder
+        "sessions": [],
     }
     return rfpoker_data
 
