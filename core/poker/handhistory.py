@@ -12,6 +12,8 @@ from poker.models import (Player, PokerTable, HandHistory, HandHistoryEvent,
                           HandHistoryAction, SideEffectSubject)
 from poker.rfpoker import generate_rfpoker_json, write_to_file
 
+import logging
+
 # important assumptions made by the JSON and DBLogs:
 #   - The END_HAND event will be called once per hand, and everything
 #       that comes after it can be considered part of the next hand
@@ -403,12 +405,12 @@ class JSONLog(HandHistoryLog):
     def commit(self):
         self._check_serialized_state()
 
+import json
 
 class DBLog(JSONLog):
     def __init__(self, accessor):
         self.accessor = accessor
         self.objects_to_save = []
-
         try:
             self.hands = [
                 HandHistory.objects.get(
@@ -624,6 +626,33 @@ class DBLog(JSONLog):
             player=player, notes=notes, current_hand_only=True
         )
 
+    def write_event(self, subj, event, **event_args):
+        super().write_event(subj, event, **event_args)
+
+        if event == Event.END_HAND and isinstance(subj, PokerTable):
+            if len(self.hands) > 1:
+                completed_hand_obj = self.hands[-2]
+                
+                # The filtered_json() method gives us everything we need:
+                # table state, players, events, and actions.
+                hand_data = completed_hand_obj.filtered_json()
+
+                # Write the whole hand data structure to a file for inspection
+                with open('completed_hand_data.json', 'w') as f:
+                    json.dump(hand_data, f, indent=4, cls=ExtendedEncoder)
+                
+                # For clarity, let's also save the actions and events separately
+                with open('events.json', 'w') as f:
+                    json.dump(hand_data.get('events', []), f, indent=4, cls=ExtendedEncoder)
+                
+                with open('actions.json', 'w') as f:
+                    json.dump(hand_data.get('actions', []), f, indent=4, cls=ExtendedEncoder)
+
+            # Now, call the rfpoker generation
+            rfpoker_data = generate_rfpoker_json(self.accessor.table, self.accessor.players, self)
+            if rfpoker_data:
+                write_to_file(rfpoker_data)
+                
     def commit(self):
         self._check_serialized_state()
         # if (len(self.current_hand().players_json)
@@ -643,9 +672,6 @@ class DBLog(JSONLog):
 
         self.objects_to_save = []
 
-        rfpoker_data = generate_rfpoker_json(self.accessor.table, self.accessor.players, self)
-        if rfpoker_data:
-            write_to_file(rfpoker_data)
 
 def fmt_hand(hand_json, filtered=True, for_player=None):
     od = OrderedDict(fmt_table(hand_json['table']))

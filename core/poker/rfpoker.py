@@ -10,172 +10,117 @@ API_ENDPOINT = "https://dev.sidebetz.ai/api/next-hand"
 TOURNAMENT_ID = "YOUR_TOURNAMENT_ID"
 
 POSITION_MAP = {
-    0: "SB",
-    1: "BB",
-    2: "UTG",
-    3: "UTG1",
-    4: "UTG2",
-    5: "LJ",
-    6: "HJ",
-    7: "CO",
-    8: "BTN",
+    0: "SB", 1: "BB", 2: "UTG", 3: "UTG1", 4: "UTG2",
+    5: "LJ", 6: "HJ", 7: "CO", 8: "BTN",
 }
+
+def get_player_by_username(players, username):
+    for player in players:
+        if player.username == username:
+            return player
+    return None
 
 def generate_rfpoker_json(table, players, hand_history):
     """
-    Generates the rfpoker JSON for the given table and players.
+    Generates the rfpoker JSON using the comprehensive hand_data dictionary.
     """
     now = timezone.now().isoformat()
-    hand_history_log = hand_history.get_log(current_hand_only=True)
-    current_hand_log = hand_history_log['hands'][0] if hand_history_log['hands'] else None
+    
+    # Get the rich, complete data structure for the hand that just ended
+    if len(hand_history.hands) < 2:
+        return None
+    completed_hand_obj = hand_history.hands[-2]
+    hand_data = completed_hand_obj.filtered_json()
 
-    if not current_hand_log:
+    if not hand_data:
         return None
 
+    # Combine events and actions from the hand_data
+    events = hand_data.get('events', [])
+    actions = hand_data.get('actions', [])
+    full_log = sorted(events + actions, key=lambda x: x.get('ts', ''))
+
+    # === Main Round Data ===
     round_data = {
         "timestamp": now,
-        "variation": table.table_type,
-        "difficulty": "ADVANCED",
-        "button": table.btn_idx,
-        "blindLevel": {
-            "index": 0,
-            "bombPot": 0,
-            "boards": 1,
-            "smallestDenomination": 25,
-            "blinds": {
-                "sb": int(table.sb),
-                "bb": int(table.bb),
-            },
-            "antes": {},
-            "straddles": {},
-            "duration": 0,
-            "breakTime": 0,
+        "variation": hand_data.get('table', {}).get('table_type'),
+        "button": hand_data.get('table', {}).get('btn_idx'),
+        "blinds": { 
+            "sb": int(Decimal(hand_data.get('table', {}).get('sb', 0))), 
+            "bb": int(Decimal(hand_data.get('table', {}).get('bb', 0))) 
         },
-        "mode": "CASH",
-        "handNumber": table.hand_number,
+        "handNumber": hand_data.get('table', {}).get('hand_number'),
         "pot": int(sum(p.wagers for p in players)),
-        "isStarred": False,
-        "permissions": "PRIVATE",
-        "timeLeft": 0,
-        "totalPlayers": len(players),
-        "activePlayers": len([p for p in players if p.is_active()]),
     }
 
+    # === Player Hand Data ===
     hands_data = []
-    winner_username = None
-    for event in current_hand_log.get('events', []):
-        if event['event'] == 'WIN':
-            winner_username = event['subj']
-            break
+    initial_players_state = hand_data.get('players', [])
+    for player_state in initial_players_state:
+        player_obj = get_player_by_username(players, player_state.get('username'))
+        if not player_obj:
+            continue
 
-    for player in players:
-        starting_stack = 0
-        cards = []
-        is_winner = player.username == winner_username
-        is_all_in = False
-
-        if current_hand_log and 'players' in current_hand_log:
-            for p_log in current_hand_log['players']:
-                if p_log['id'] == player.id:
-                    starting_stack = p_log['stack']
-                    break
-
-        for event in current_hand_log.get('events', []):
-            if event['event'] == 'DEAL' and event['subj'] == player.username:
-                cards.append(event['args']['card'])
-            if event['event'] in ['BET', 'RAISE_TO', 'CALL'] and event['args'].get('all_in'):
-                is_all_in = True
-
-
-        hand_class = ""
-        if cards and all(c != '?' for c in cards) and len(cards) + len(table.board) >= 5:
-            best_hand = rankings.best_hand_from_cards([Card(c) for c in cards] + table.board)
-            hand_class = rankings.hand_to_name(best_hand)
-
+        player_log_items = [log for log in full_log if log.get('subj') == player_state.get('username')]
+        player_cards = [
+            item['args']['card'] for item in player_log_items 
+            if item.get('event') == 'DEAL' and 'card' in item.get('args', {})
+        ]
+        is_winner = any(item.get('event') == 'WIN' and item.get('subj') == player_state.get('username') for item in player_log_items)
 
         hands_data.append({
-            "cards": cards,
-            "startingStack": int(starting_stack),
-            "endingStack": int(player.stack),
-            "seat": player.position,
-            "position": POSITION_MAP.get(player.position, "UNKNOWN"),
-            "playerNameOverride": player.username,
-            "playerId": str(player.user.id) if player.user else None,
-            "sessionId": None,  # Placeholder
-            "buyIn": int(player.user.default_buyin * table.bb) if player.user else 0,
-            "bonus": 5,
-            "tips": 0,
+            "cards": player_cards,
+            "startingStack": int(Decimal(player_state.get('stack', 0))),
+            "endingStack": int(player_obj.stack), # Current stack from the live player object
+            "seat": player_state.get('position'),
+            "position": POSITION_MAP.get(player_state.get('position'), "UNKNOWN"),
+            "playerNameOverride": player_state.get('username'),
             "isWinner": is_winner,
-            "isShowdown": False,  # To be implemented
-            "isAllIn": is_all_in,
-            "handClasses": [hand_class],
-            "timestamp": now,
-            "permissions": "PRIVATE",
         })
 
+    # === Streets and Actions Data ===
     streets_data = []
-    actions_data = []
+    actions_data_final = []
+    current_street = "PREFLOP"
+    
+    # Correctly parse the board_str
+    board_str = hand_data.get('table', {}).get('board_str', '')
+    board_cards = [Card(c) for c in board_str.split(',') if c] if board_str else []
 
-    if current_hand_log:
-        street = "PREFLOP"
-        pot_size = 0
-        for event in current_hand_log.get('events', []):
-            if event['event'] == 'NEW_STREET':
-                if street == "PREFLOP":
-                    street = "FLOP"
-                elif street == "FLOP":
-                    street = "TURN"
-                elif street == "TURN":
-                    street = "RIVER"
+    # Process actions to assign streets
+    for log_item in full_log:
+        event_name = log_item.get('event')
+        action_name = log_item.get('action')
 
-            if event['event'] in ['POST', 'ANTE', 'BET', 'RAISE_TO', 'CALL']:
-                pot_size += int(float(event['args']['amt']))
+        if event_name == 'NEW_STREET':
+            if current_street == "PREFLOP": current_street = "FLOP"
+            elif current_street == "FLOP": current_street = "TURN"
+            elif current_street == "TURN": current_street = "RIVER"
+        
+        elif action_name:
+            acting_player = get_player_by_username(players, log_item.get('subj'))
+            if acting_player:
+                actions_data_final.append({
+                    "bet": int(Decimal(log_item.get('args', {}).get('amt', 0))),
+                    "actionType": action_name,
+                    "timestamp": log_item.get('ts'),
+                    "street": current_street,
+                    "actingSeat": acting_player.position
+                })
 
-
-        streets = ["PREFLOP", "FLOP", "TURN", "RIVER"]
-        board = table.board
-        street_cards = {
-            "PREFLOP": [],
-            "FLOP": board[:3],
-            "TURN": board[:4],
-            "RIVER": board[:5],
-        }
-
-        for street_name in streets:
-            streets_data.append({
-                "cards": [str(c) for c in street_cards[street_name]],
-                "boards": 1,
-                "pot": 0,  # To be implemented
-                "timestamp": now,
-                "streetType": street_name,
-                "equities": [],
-                "playerSeats": [],
-            })
-
-        for action in current_hand_log.get('actions', []):
-            actions_data.append({
-                "bet": int(float(action.get('args', {}).get('amt', 0))),
-                "actionType": action['action'],
-                "timestamp": action['ts'],
-                "call": 0, # To be implemented
-                "minRaise": 0, # To be implemented
-                "maxRaise": 0, # To be implemented
-                "stack": 0, # To be implemented
-                "actingSeat": 0, # To be implemented
-                "equities": [],
-                "street": "", # To be implemented
-                "playerSeats": [],
-                "pot": 0, # To be implemented
-                "powerupType": "NONE",
-            })
-
-
+    # Assemble the final streets data using the parsed board cards
+    streets_data.append({"streetType": "PREFLOP", "cards": []})
+    streets_data.append({"streetType": "FLOP", "cards": [str(c) for c in board_cards[:3]]})
+    streets_data.append({"streetType": "TURN", "cards": [str(c) for c in board_cards[:4]]})
+    streets_data.append({"streetType": "RIVER", "cards": [str(c) for c in board_cards]})
+    
+    # === Final Assembly ===
     rfpoker_data = {
         "tournament_id": TOURNAMENT_ID,
         "round": round_data,
         "hands": hands_data,
         "streets": streets_data,
-        "actions": actions_data,
+        "actions": actions_data_final,
         "tableId": str(table.id),
         "sessions": [], # Placeholder
     }
